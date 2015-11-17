@@ -5,7 +5,8 @@
 
 
 # Define parameters (future - selectable/prompt with defaults, logarithmic scaling starting at 0)
-# Future/side project, tracreroute and perform on a router basis to detect which router is causing overhead.  (useful in enterprise enviornment)
+# Future/side project, tracreroute and perform on per-hop basis to detect which network segments are causing overhead.  
+# (useful in an enterprise enviornment)
 
 $IPAddress = "www.google.com"
 $MaxMTU = 1536
@@ -55,8 +56,15 @@ while (-not $MTUSizeFound) {
     }
 }
 
+# Add 28 bits for frame header that is not included in ping size (payload) parameters.  (Payload+Header=MTU)
+# Need VLAN detection for optional 4 bits in header.
+
+$MTUSize=$MTUSize+28
 Write-Host "MTU Size: $MTUSize"
 
-# (future) Set NIC MTU size with commands below
-# netsh interface ipv4 show interfaces
-# netsh interface ipv4 set interface [interface Idx] mtu $MTUSize
+# Change internet adapter MTU settings.
+
+netsh interface ipv4 show interfaces
+$Interface = Read-Host -Prompt 'Input which interface (Idx number) you would like to change'
+netsh interface ipv4 set interface "$Interface" "mtu=$MTUSize"
+netsh interface ipv4 show interfaces
