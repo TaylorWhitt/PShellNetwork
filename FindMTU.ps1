@@ -7,19 +7,20 @@ Function Find-MTU {
     
     <#
     .Synopsis
-		Will conduct a series of ping requests to a target host with DF bit set.
-	.Description
-		Will conduct a series of ping requests to a target host with DF bit set.
+	Will conduct a series of ping requests to a target host with DF bit set.
+    .Description
+	Will conduct a series of ping requests to a target host with DF bit set.
 
-		-Set 
-Will perform netsh commands and prompt the user to change the interface specified to optimal settings.
-*Requires elevated privledges*
+    -Set 
+    Will perform netsh commands and prompt the user to change the interface specified to optimal settings.
+    *Requires elevated privledges*
 
-  -ShowSteps 
-  Will write messages to the console to walk the user through the steps being performed within the function.
+    -ShowSteps 
+    Will write messages to the console to walk the user through the steps being performed within the function.
 
-  -Idx
-  Will select the local interface to change within the -Set switch. If left blank, you will be prompted with your options.
+    -Idx
+    Identifies the local interface to change within the -Set switch. If left blank, you will be prompted with your options.
+	
 	.Example
 	 Find-MTU www.google.com
         Will conduct a series of Do-Not-Fragment ping requests to "www.google.com" until a Maximum Transmission Unit is found, and output 
@@ -28,7 +29,7 @@ the result to the host. This does not account for the additional frame header wh
      Find-MTU 8.8.8.8 -Set -ShowSteps
 Will conduct a series of Do-Not-Fragment ping requests target 8.8.8.8 until a Maximum Transmission Unit is found.
 Once found, will promt the user to select which interface is being used and will change the interface's MTU settings accordingly.
-This will account for the additional frame header and detects VLAN settings. Each step will be written to the console as a Gee-Wiz.
+This will account for the additional frame header and detects VLAN settings. Each step will be written to the console.
 
 **NOTE** "-Set" requires administrator privledges to implement network interface changes.
 #>
