@@ -1,7 +1,6 @@
 # PShellNetwork
 # Powershell Scripts to assist with networking optomizations.
 # This is my very first scripting experience that actually does something useful - go easy on me/suggestions welcome.
-# I still need error handling and detection for low MTU settings.
 
 Function Find-MTU {
     
