@@ -94,7 +94,7 @@ You Provided: $Address"
             Write-Host "Incrementing steps: $Numberofsteps"
             } #If
 
-        & '.\PING.EXE' -f $Address -l $MTUSize -n 1 | Out-Null
+        & 'PING.EXE' -f $Address -l $MTUSize -n 1 | Out-Null
 
     
             if ($LASTEXITCODE -eq 0) {
