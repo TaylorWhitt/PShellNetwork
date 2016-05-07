@@ -1,7 +1,5 @@
 # PShellNetwork
 Powershell Scripts to assist with networking.
-First project is to detect the optimal MTU settings to reduce fragmentation that may cause delay/lag.  
 
-I'm sure I will find more uses for powershell to optimize a network in the future, but I'm learning it on my own... it may take a while.
+I'm still not sure how to use GitHub correctly, but I'm a network engineer that is starting to learn powershell.  These are some things I find useful.
 
-Suggestions welcome!
