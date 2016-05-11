@@ -2,7 +2,7 @@
 # Powershell Scripts to assist with networking optomizations.
 # This is my very first scripting experience that actually does something useful - go easy on me/suggestions welcome.
 
-Function Find-MTU {
+Function Get-MTU {
     
     <#
     .Synopsis
