@@ -1,24 +1,77 @@
-Function Wake-Computer {
+Function Invoke-WakeComputer {
 [CmdletBinding()]
     Param(
     [Parameter(Mandatory=$True,
         Position=1,
-        HelpMessage='MAC address of comptuer to wake',
+        ParameterSetName = 'ByMAC',
+        HelpMessage='MAC address(es) of computer(s) to wake',
         ValueFromPipeline=$True,
         ValueFromPipelineByPropertyName=$True)]
-    [string[]]$Mac
+    [string[]]$MAC,
+    [Parameter(Mandatory=$False,
+        Position=2,
+        HelpMessage='Computer Name, IP, or Broadcast address of Computer to wake. Default is local subnet.',
+        ValueFromPipelineByPropertyName=$True)]
+    $ComputerName = ([System.Net.IPAddress]::Broadcast),
+    [int]$Retry = 1,
+    [Parameter(Mandatory=$True,
+        Position=1,
+        ParameterSetName = 'FromFile',
+        HelpMessage='File containing MAC addresses of computer(s) to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [string]$FromFile,
+    [Parameter(Mandatory=$True,
+        Position=2,
+        ParameterSetName = 'FromFile',
+        HelpMessage='Header for MAC address of computers to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [string]$MACHeader,
+    [Parameter(Mandatory=$True,
+        Position=3,
+        ParameterSetName = 'FromFile',
+        HelpMessage='Header for hostnames or IPs to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [String]$ComputerHeader,
+    [int]$Packets
     )
+    BEGIN {
+    IF ($FromFile) {
+    $File = Import-CSV $FromFile | select @{Name='MAC';Expression="$MACHeader"},@{Name='ComputerName';Expression="$ComputerHeader"}} 
+    }
     Process {
-        ForEach ($Address in $Mac) {
-            $MacByteArray = $Mac -split "[:-]" | ForEach-Object { [Byte] "0x$_"}
-            [Byte[]] $MagicPacket = (,0xFF * 6) + ($MacByteArray  * 16) 
-            Write-Verbose "Sending Packet to $Address"
-            $UdpClient = New-Object System.Net.Sockets.UdpClient
-            $UdpClient.Connect(([System.Net.IPAddress]::Broadcast),7)
-            $UdpClient.Send($MagicPacket,$MagicPacket.Length) | Out-Null
-            Write-Verbose "Packet Sent"
-            $UdpClient.Close()
+        $List = @()
+        if ($MAC) {
+        $MAC
+        $List += $MAC}
+        if ($FromFile) {
+        $List += $File}
+        ForEach ($Address in $List) {
+            IF ($FromFile) {
+            $ComputerName = $Address.ComputerName
+            $ComputerName = [System.Net.DNS]::GetHostEntry("$ComputerName").hostname
+            $MACBytes = ($Address.MAC -replace '[-:.]','' -replace '[{}]','').ToUpper()
+            }
+            IF ($MAC) {
+            $MACBytes = ($Address -replace '[-:.]','' -replace '[{}]','').ToUpper()
+            }
+            $MACBytes =  [Net.NetworkInformation.PhysicalAddress]::Parse($MACBytes)
+            [string]$Value = $MACBytes.ToString()
+            if ($Value.Length -eq 12) {
+                $MagicPacket = [byte[]]@(255,255,255, 255,255,255);
+                $MagicPacket += ($MACBytes.GetAddressBytes()*16)
+                Write-Verbose "Sending Packet to $MACBytes, at $ComputerName"
+                $UdpClient = New-Object System.Net.Sockets.UdpClient
+                $UdpClient.Connect($ComputerName,7)
+                $UdpClient.Send($MagicPacket,$MagicPacket.Length)
+                Write-Verbose "Packet Sent"
+                $UdpClient.Close()
+            } else {
+                Write-Error "The MAC Address specified is of the correct length: $Value" 
+            }
         }
     }
+    END {}
 }
-
