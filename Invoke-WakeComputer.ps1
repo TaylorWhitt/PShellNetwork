@@ -69,7 +69,7 @@ Function Invoke-WakeComputer {
                 Write-Verbose "Packet Sent"
                 $UdpClient.Close()
             } else {
-                Write-Error "The MAC Address specified is of the correct length: $Value" 
+                Write-Error "The MAC Address specified is not of the correct length: $Value" 
             }
         }
     }
