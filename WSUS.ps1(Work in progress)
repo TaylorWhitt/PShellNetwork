@@ -1,5 +1,4 @@
 Work in progress.  Use at your own risk - not complete!
-
 #Connect to Server
 Function Connect-WSUS {
     [CmdletBinding()]
@@ -176,7 +175,7 @@ Function Get-WSUSUpdate {
     Param(
         [Parameter(Position=0,ValueFromPipeline = $True,ParameterSetName = 'Update')]
         [string[]]$Update,
-        [string]$IncludeText,
+        [string[]]$IncludeText,
         [string]$ExcludeText,
         [ValidateSet('LatestRevisionApproved', 'HasStaleUpdateApprovals', 'NotApproved', 'Declined', 'Any')]
         [Microsoft.UpdateServices.Administration.ApprovedStates]$ApprovedState,
@@ -276,9 +275,6 @@ Function Get-WSUSUpdate {
             If ($PSBoundParameters['Classification']) {
                 [void]$UpdateScope.Classifications.AddRange($Classification)
             }
-            If ($PSBoundParameters['IncludeText']) {
-                $UpdateScope.TextIncludes = $IncludeText
-            }
             If ($PSBoundParameters['ExcludeText']) {
                 $UpdateScope.TextNotIncludes = $ExcludeText
             }
@@ -302,7 +298,15 @@ Function Get-WSUSUpdate {
             } #Update
             'UpdateScope' {
                 Write-Verbose "Using Parameterset 'UpdateScope'"
-                $Updates += $Wsus.GetUpdates($UpdateScope)
+                
+                If ($PSBoundParameters['IncludeText']) {
+                    foreach ($Value in $IncludeText) {
+                        $UpdateScope.TextIncludes = $Value
+                        $Updates += $Wsus.GetUpdates($UpdateScope)
+                    }
+                } Else {
+                    $Updates += $Wsus.GetUpdates($UpdateScope)
+                }
             } #UpdateScope
             'ByComputerTargetGroup'{
                 Write-Verbose "Using Parameterset 'ByComputerTargetGroup'"
@@ -311,13 +315,12 @@ Function Get-WSUSUpdate {
                         Write-Verbose "Determining group targets by Role."
                         $ExcludeComputers = $Wsus.Getcomputertargets() | Where {$_.ComputerRole -ne $ApprovedGroupsByRole}
                         $IncludeComputers = $Wsus.Getcomputertargets() | Where {$_.ComputerRole -iin $ApprovedGroupsByRole}
-                        $IncludeTargetGroup = 
-                            $IncludeComputers.GetComputerTargetGroups().Name | select -unique | 
-                                where {$_ -notin $ExcludeComputers.GetComputerTargetGroups().Name | select -Unique}
-                            if ($IncludeTargetGroup -eq $null) {
-                                Write-Host "The selected OS did not have any unique groups assigned to it. Cancelling search."
-                                Break
-                            } #If
+                        $IncludeTargetGroup = $IncludeComputers.GetComputerTargetGroups().Name | select -unique | 
+                            where {$_ -notin $ExcludeComputers.GetComputerTargetGroups().Name | select -Unique}
+                        if ($IncludeTargetGroup -eq $null) {
+                            Write-Host "The selected OS did not have any unique groups assigned to it. Cancelling search."
+                            Break
+                        } #If
                     } #If
                     if ($ApprovedGroupsByOSDescription){
                         Write-Verbose "Determining group targets by OS Description."
@@ -380,8 +383,17 @@ Function Approve-WSUSUpdate {
     Get-WSUSUpdate -Update "KB979906" | Approve-WSUSUpdate -Group [Group] -Action Install
     Description
     ----------- 
-    This command will take the collection of objects from the Get-PSWSUSUpdate command and then approve all updates for 
+    This command will take the collection of objects from the Get-WSUSUpdate command and then approve all updates for 
     the specified groups and the action command of 'Install'.
+    
+    
+    Get-WSUSUpdate -Update "KB979906" | Approve-WSUSUpdate -Action Install
+    Description
+    ----------- 
+    This command will take the collection of objects from the Get-WSUSUpdate command and then Dynamically lookup unique groups 
+    applicable to each update, and approve each update for their respective unique group with the action command of 'Install'.
+    Groups are selected exclusively, and may not select every group the update applies to.  
+    It is intended to remove "All Computers", and parent groups.  Use with caution.
            
     #> 
     [cmdletbinding(
@@ -406,7 +418,6 @@ Function Approve-WSUSUpdate {
     DynamicParam {
             $ParamOptions = @(
                 @{
-                'ParameterSetName' = 'collection';
                 'Name' = 'Group';
                 'Mandatory' = $False;
                 'ValidateSetOptions' = $Wsus.GetComputerTargetGroups() | select -ExpandProperty Name -Unique  | sort Name
@@ -423,41 +434,65 @@ Function Approve-WSUSUpdate {
         $PsBoundParameters.GetEnumerator() | foreach { New-Variable -Name $_.Key -Value $_.Value -ea 'SilentlyContinue'}            
     } #Begin
     Process {
-        If ($Group) {
-            ForEach ($Patch in $Update) {
-            $TargetGroup = $Wsus.GetComputerTargetGroups() | Where {$_.Name -iin $Group}
-                ForEach ($G in $TargetGroup) {  
-                #Accept any licenses, if required
-                    If ($Patch.RequiresLicenseAgreementAcceptance -AND -NOT($PSBoundParameters.ContainsKey('WhatIf'))) {
-                        #Approve License
-                        Write-Verbose ("Accepting license aggreement for {0}" -f $Patch.title)
-                        $Patch.AcceptLicenseAgreement()
-                    }
-                #Determine if Deadline is required
-                    If ($PSBoundParameters['deadline']) {
-                        Write-Verbose "Approving update with a deadline."
-                        If ($pscmdlet.ShouldProcess($($Patch.SecurityBulletins),$($Patch.title),"Approve update on $($Group.name)")) {
-                            #Create the computer target group
-                            $Data = $Patch.Approve($Action,$TargetGroup,$Deadline)
-                            #Print out report of what was approved
-                        }        
-                    } Else {    
-                #Approve the patch
-                        Write-Verbose "Approving update without a deadline."                              
-                        If ($pscmdlet.ShouldProcess($($Patch.title),"Approve update on $($Group.name)")) {
-                            #Create the computer target group
-                            $Data = $Patch.Approve($Action,$TargetGroup)
-                            #Print out report of what was approved               
-                        }
-                    }
-                    If ($PSBoundParameters['PassThru']) {
-                        Write-Output $Data
-                    }
-                    
-                }
+        $RequiredUpdates = @()
+        $UpdateRelationship = [Microsoft.UpdateServices.Administration.UpdateRelationship]::UpdatesRequiredByThisUpdate
+        $RequiredUpdates += $Update.GetRelatedUpdates($UpdateRelationship)| Where {$_.IsApproved -ne $True} 
+        If ($RequiredUpdates) {
+            $RUpdates = $RequiredUpdates.Title
+            Write-Host "`n Required Updates: `n"
+            $RUpdates
+            $Approve? = Read-Host "Approve Required Updates? (y/n)"
+            If ($Approve? -match "y") {
+                $Update += $RequiredUpdates
             }
-        } Else {
-            Write-Verbose "No groups selected"
+        }
+        ForEach ($Patch in $Update) {   
+            If ($Group) {
+                $TargetGroup = $Wsus.GetComputerTargetGroups() | Where {$_.Name -iin $Group}
+            } Else {
+            # Maybe add $Item.GetSummary($Computerscope)| Where {($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -gt "0"} 
+            #To detect applicable groups.
+                $DynamicGroup = $Null
+                $Title = $Patch.Title
+                Write-Verbose "Group not provided, attempting to select an exclusive group for: $Title"
+                $DynamicGroup = (Find-UniqueWSUSGroupForUpdate -Update $Patch)
+                $TargetGroup = $Wsus.GetComputerTargetGroups() | Where {$_.Name -iin $DynamicGroup} 
+                If ($DynamicGroup){
+                    Write-Verbose "Unique group(s) found. `n         $DynamicGroup"
+                } Else {
+                $Patch = $Patch.Title
+                Write-Verbose "$Patch had no selected/applicable Groups `n"
+                Break
+                }
+            } 
+            ForEach ($G in $TargetGroup) {  
+            #Accept any licenses, if required
+                If ($Patch.RequiresLicenseAgreementAcceptance -AND -NOT($PSBoundParameters.ContainsKey('WhatIf'))) {
+                    #Approve License
+                    Write-Verbose ("Accepting license aggreement for {0}" -f $Patch.title)
+                    $Patch.AcceptLicenseAgreement()
+                }
+            #Determine if Deadline is required
+                If ($PSBoundParameters['deadline']) {
+                    Write-Verbose "Approving update with a deadline."
+                    If ($pscmdlet.ShouldProcess($($Patch.SecurityBulletins),$($Patch.title),"Approve update on $($G.name)")) {
+                        #Create the computer target group
+                        $Data = $Patch.Approve($Action,$G,$Deadline)
+                        #Print out report of what was approved
+                    }        
+                } Else {    
+            #Approve the patch
+                    Write-Verbose "Approving update without a deadline. `n"                              
+                    If ($pscmdlet.ShouldProcess($($Patch.SecurityBulletins),$($Patch.title),"Approve update on $($G.name)")) {
+                        #Create the computer target group
+                        $Data = $Patch.Approve($Action,$G)
+                        #Print out report of what was approved               
+                    }
+                }
+                If ($PSBoundParameters['PassThru']) {
+                    Write-Output $Data
+                }
+            }       
         }
     } #Process       
     End {} #End    
@@ -645,24 +680,125 @@ https://technet.microsoft.com/en-us/library/cc720492(WS.10).aspx
 https://learn-powershell.net/2013/05/07/tips-on-implementing-pipeline-support/
 https://blogs.technet.microsoft.com/pstips/2014/06/09/dynamic-validateset-in-a-dynamic-parameter/
 #>
-Function Check-UpdateStatus {
-[cmdletbinding(
-        SupportsShouldProcess = $True)]
+Function Get-WSUSUpdateReport {
+[cmdletbinding()]
 Param(
-[string[]]$Updates
+[string[]]$Updates,
+[String[]]$GroupBy
 )
     Process {
-        $HT = @()
-        $computerscope = New-Object Microsoft.UpdateServices.Administration.ComputerTargetScope
-        $updatescope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
+        [Selected.Microsoft.UpdateServices.Internal.BaseApi.UpdateSummary]$HT = @()
+        
+        $Computerscope = New-Object Microsoft.UpdateServices.Administration.ComputerTargetScope
+        $Updatescope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
         ForEach ($Update in $Updates) {
             Write-Verbose "Searching for $Update"
-            $updatescope.TextIncludes = "$Update"
-            $Summary = $wsus.GetSummariesPerUpdate($updatescope,$computerscope) | Select @{L=’UpdateTitle';E={($wsus.GetUpdate([guid]$_.UpdateId)).Title}},@{L=’NeededCount';E={($_.DownloadedCount + $_.NotInstalledCount)}},DownloadedCount,NotApplicableCount,NotInstalledCount,InstalledCount,FailedCount | Where {($_.NeededCount -or $_.DownloadedCount -or $_.NotInstalledCount) -gt 0} | sort UpdateTitle | FT -autosize -wrap
-            ForEach ($Item in $Summary) {
-                $HT += $Item
+            $Patch = $wsus.SearchUpdates("$Update")
+            ForEach ($Item in $Patch) {
+                $Entry = $Item.Title
+                $Updatescope.TextIncludes = "$Entry"
+                $Summary = $Item.GetSummary($Computerscope)| Where {($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -gt "0"} 
+                If ($Summary) {
+                $Item = $Item
+                $Entry = $Item.Title
+                Write-Verbose "Needed patch found : $Entry"
+                $Summary = $Summary | Select @{L=’UpdateTitle';E={($wsus.GetUpdate([guid]$_.UpdateId)).Title}},
+                @{L='MSArticle';E={($wsus.GetUpdate([guid]$_.UpdateId)).SecurityBulletins}},
+                @{L='IsApproved';E={($wsus.GetUpdate([guid]$_.UpdateId)).IsApproved}},
+                @{L='ProductTitles';E={($wsus.GetUpdate([guid]$_.UpdateId)).ProductTitles}},
+                @{L='KnowledgebaseArticles';E={($wsus.GetUpdate([guid]$_.UpdateId)).KnowledgebaseArticles}},
+                @{L=’NeededCount';E={($_.DownloadedCount + $_.NotInstalledCount)}},
+                NotApplicableCount,InstalledCount,FailedCount
+                $Clients = $wsus.GetSummariesPerComputerTarget($updatescope,$computerscope) | Where {($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -gt "0"} | select @{L=’Client';E={($wsus.GetComputerTarget([guid]$_.ComputerTargetId).FullDomainName)}}
+                $NonClients = $wsus.GetSummariesPerComputerTarget($updatescope,$computerscope) | Where {($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -eq "0"}
+                $IncludeGroups = @()
+                $IncludeGroupValues = @()
+                $ExclueGroups = @()
+                $b = $Item.GetSummaryPerComputerTargetGroup()  
+                ForEach ($a in $b) {
+                    If (($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -gt "0") {
+                     $_.ComputerTargetGroupId
+                    $IncludeGroupValues += $Wsus.GetComputerTargetGroups().GetComputerTargets().FullDomainName
+                    } Else {
+                    $ExcludeGroups += $_.ComputerTargetGroupId 
+                    }
+                }
+                $IncludeUniqueGroups = ($IncludeGroupValues | Where {$_ -notin $ExcludeGroups})
+                ForEach ($Group in $IncludeUniqueGroups) {
+                $IncludeGroups += $wsus.GetComputerTargetGroup("$Group").Name
+                }
+
+                $Groups = $Item.GetSummaryPerComputerTargetGroup()  | Where {($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount) -gt "0"} | ForEach ($_.ComputerTargetGroupId) {
+                    $Group = $_.ComputerTargetGroupId
+                    $WSUS.GetComputerTargetGroup([guid]"$Group").Name } | Select -Unique
+                $Summary | Add-Member -MemberType NoteProperty -Name NonCompliantComputers -Value $Clients.Client
+                $Summary | Add-Member -MemberType NoteProperty -Name NonCompliantGroups -Value $IncludeGroups
+                $HT+=$Summary
+                }
             }
         }
-        $HT
+        $HT | sort Neededcount -Descending
+        $Script:HT = $HT
+    }
+}
+Function Find-UniqueWSUSGroupForUpdate {
+[CmdletBinding()]
+Param(
+[Parameter(Mandatory = $True,ValueFromPipeline = $True)]
+        [ValidateNotNullOrEmpty()]
+        [Microsoft.UpdateServices.Internal.BaseApi.Update[]]$Update,
+[Parameter(Mandatory = $False)]
+[switch]$Inclusive
+)
+Process {
+    $updatescope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
+    $ComputerScope = New-Object Microsoft.UpdateServices.Administration.ComputerTargetScope
+    
+    $NonCompliantComputers = @()
+    $CompliantComputers = @()
+    $IncludeGroups = @()
+    $UniqueIncludeGroups = @()
+    $ExcludeGroups = @()
+    $NonCompliantComputerIds = @()
+    $CompliantComputerIds = @()
+    $Groups = @()
+    ForEach ($Patch in $Update) {
+        $Title = $Patch.Title
+        $UpdateScope.TextIncludes = "$Title"
+        Write-Verbose "Getting compliance summary for $Title"
+        $ComplianceSummary = $wsus.GetSummariesPerComputerTarget($updatescope,$computerscope) | Select *,@{L='NeededTotal';E={($_.NotInstalledCount + $_.FailedCount + $_.DownloadedCount + $_.InstalledPendingRebootCount + $_.InstalledCount)}},@{L="ComputerName";E={($wsus.GetComputerTarget([guid]$_.ComputerTargetId).FullDomainName)}}
+        Write-Verbose "Assigning targets to groups based on applicability."
+        ForEach ($I in $ComplianceSummary) {
+            If ($I.NeededTotal -gt "0") {
+                $Id = $I.ComputerTargetId
+                $Name = $I.ComputerName
+                $NonCompliantComputers += $Wsus.GetComputerTarget("$Id")
+                Write-Verbose "Adding $Name to Applicable"
+            } Else {
+                $Id = $I.ComputerTargetId
+                $Name = $I.ComputerName
+                $CompliantComputers += $Wsus.GetComputerTarget("$Id")
+                Write-Verbose "Adding $Name to Not Applicable"
+            }
+        }
+        $ExcludeGroups = $CompliantComputers.ComputerTargetGroupIds | Select -Unique
+        Write-Verbose "Exclude: $ExcludeGroups"
+        $IncludeGroups = $NonCompliantComputers.ComputerTargetGroupIds | Select -Unique
+        Write-Verbose "Include: $IncludeGroups"
+        Write-Verbose "Finding unique update groups based on applicability."
+        $UniqueIncludeGroups = $IncludeGroups | Where {$_ -notin $ExcludeGroups}
+        $Groups += $Wsus.GetComputerTargetGroups() | where {"$UniqueIncludeGroups" -match $_.Id} | select Name
+        $Script:NoUniqueGroups = @()
+        $Script:MissingApprovals = @()
+        ForEach ($Computer in $CompliantComputers) {
+        #Check if atleast one group is included in UniqueGroups.
+            If ($_.ComputerTargetGroupIds -iin $UniqueIncludeGroups) {
+            #No Action} Else{
+            $Script:NoUniqueGroups += $Computer
+            $Script:MissingApprovals += $Patch
+            }
+        }
+        $Groups
+        }
     }
 }
