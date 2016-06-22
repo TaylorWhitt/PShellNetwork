@@ -1,0 +1,17 @@
+Function Send-Popup {
+    [cmdletbinding(
+    	DefaultParameterSetName = 'collection',
+        SupportsShouldProcess = $True
+    )] #cmdletbinding
+  Param(
+  [Parameter(Mandatory = $True,ValueFromPipeline = $True)]
+  [ValidateNotNullOrEmpty()]
+    $Message = $Null,
+  [Parameter(Mandatory = $True,ValueFromPipeline = $True)]
+  [ValidateNotNullOrEmpty()]
+    $ComputerName = $Null
+  )
+    Process {
+    Invoke-WmiMethod -Class win32_process -ComputerName $ComputerName -Name create -ArgumentList  "c:\windows\system32\msg.exe * $Message"
+    }
+}
