@@ -1,0 +1,668 @@
+Work in progress.  Use at your own risk - not complete!
+
+#Connect to Server
+Function Connect-WSUS {
+    [CmdletBinding()]
+    Param(
+    [Parameter(Mandatory=$False,
+        ParameterSetName="Connection",
+        Position=1,
+        HelpMessage='Server to Connect to',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+        [string]$Server = $null,
+    [Parameter(Mandatory=$False,
+        ParameterSetName="Connection",
+        Position=2,
+        HelpMessage='Server to Connect to',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+        [int]$Port = $null,
+    [Parameter()]
+        [switch]$SecureConnection
+    ) #Param
+    Process {
+    Write-Verbose $Server
+        #Attempt to pull WSUS server name and port from registry key to use.
+        if (-not $Server) {
+            $UpdateServer = ((Get-ItemProperty -Path Registry::HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate -Name WUServer).WUServer) -match '(?<Protocol>^http(s)?)(?:://)(?<Computername>(?:(?:\w+(?:\.)?)+))(?::)?(?<Port>.*)'
+            $Port = $Matches.Port
+            $Protocol
+            $Updateserver = $Matches.ComputerName
+        } #if 
+    Write-Verbose "Resolving $Updateserver in case of alias."
+    $Server = [System.Net.DNS]::GetHostEntry("$UpdateServer").hostname
+        #Make connection to WSUS server.
+        Try {
+            Add-Type -Path 'C:\Program Files\Update Services\Api\Microsoft.UpdateServices.Administration.dll'
+            Write-Verbose "Attempting a connection to $Server on $Port."
+            $Script:WSUS = [Microsoft.UpdateServices.Administration.AdminProxy]::GetUpdateServer($Server,$SecureConnection,$Port)
+        } catch { Write-Warning "A connection to $Server on port $Port could not be made!`n$($Error[0])"
+        Break
+        } #Try/Catch
+    Write-Host "Connection to $Server on port $Port was successful."
+    $Script:WSUSConfig = $Wsus.GetConfiguration()
+    } #Process
+    End {
+    $Script:LoginBytes = $wsus.GetContentDownloadProgress().DownloadedBytes
+    }
+ } #Function
+Function New-ValidationDynamicParam {
+    [CmdletBinding()] #cmdletbinding
+    [OutputType('System.Management.Automation.RuntimeDefinedParameter')] #OutputType
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory)]
+        [array]$ValidateSetOptions,
+        [Parameter()]
+        [switch]$Mandatory = $false,
+        [Parameter()]
+        [string]$ParameterSetName = '__AllParameterSets',
+        [Parameter()]
+        [switch]$ValueFromPipeline = $false,
+        [Parameter()]
+        [switch]$ValueFromPipelineByPropertyName = $false
+    ) #Param
+    $AttribColl = New-Object System.Collections.ObjectModel.Collection[System.Attribute]
+    $ParamAttrib = New-Object System.Management.Automation.ParameterAttribute
+    $ParamAttrib.Mandatory = $Mandatory.IsPresent
+    $ParamAttrib.ParameterSetName = $ParameterSetName
+    $ParamAttrib.ValueFromPipeline = $ValueFromPipeline.IsPresent
+    $ParamAttrib.ValueFromPipelineByPropertyName = $ValueFromPipelineByPropertyName.IsPresent
+    $AttribColl.Add($ParamAttrib)
+    $AttribColl.Add((New-Object System.Management.Automation.ValidateSetAttribute($Param.ValidateSetOptions)))
+    $RuntimeParam = New-Object System.Management.Automation.RuntimeDefinedParameter($Param.Name, [string], $AttribColl)
+    $RuntimeParam
+}#Function
+Function Get-WSUSUpdate {
+    <#  
+    .SYNOPSIS  
+        Retrieves information from a wsus update.
+        
+    .DESCRIPTION
+        Retrieves information from a wsus update. Depending on how the information is presented in the search, more
+        than one update may be returned.
+            Dynamic Parameters are -Role, -OSDescription, -ComputerTargetGroups; They are available once a variable of $WSUS is defined of
+            TypeName: Microsoft.UpdateServices.Internal.BaseApi.UpdateServer
+         
+    .PARAMETER Update
+        String to search for. This can be any string for the update to include
+        KB article numbers, name of update, category, etc... Use of wildcards (*,%) are not allowed in search!
+    .PARAMETER Role
+        Dynamic WSUS-defined Computer Role.  Searches are targeted against the unique groups of the computers included.
+    .PARAMETER OSDescription
+        Dynamic WSUS-defined OS Descriptions.  Searches are targeted against the unique groups of computers with the included.
+    .PARAMETER ComputerTargetGroups
+        Dynamic WSUS-defined Computer Groups to search against.  Multiple groups may be defined separated with a "," but groups with spaces need "" around them.
+    .PARAMETER IncludeText
+        Text to include in search
+    .PARAMETER ExcludeText
+        Text to exclude from search
+    .PARAMETER ApprovedState
+        Approval states to search for
+    .PARAMETER UpdateType
+        Update types to search for
+    .PARAMETER ComputerTargetGroups
+        List of target groups to search for approvals
+    .PARAMETER ExcludeOptionalUpdates
+        Exclude optional updates from the list
+    .PARAMETER IsWsusInfrastructureUpdate
+        Filter for WSUS infrastructure updates
+    .PARAMETER IncludedInstallationState
+        Installation states to search for
+    .PARAMETER ExcludedInstallState
+        Installation states to exclude
+    .PARAMETER FromArrivalDate
+        Minimum arrival date to search for
+    .PARAMETER ToArrivalDate
+        Maximum arrival date to search for
+    .PARAMETER FromCreationDate
+        Minimum creation date to search for
+    .PARAMETER ToCreationDate
+        Maximum creation date to search for
+    .PARAMETER UpdateApprovalAction
+        Update approval actions to search for
+    .PARAMETER UpdateSource
+        Update sources to search for
+    .PARAMETER Category
+        List of update categories to search.
+    .PARAMETER Classification
+        List of update classifications to search
+        
+    .NOTES  
+        Name: Get-PSWSUSUpdate
+        Author: Boe Prox
+        Version History: 
+            1.2 | 18 Feb 2015
+                -Renamed to Get-PSWSUSUpdate
+                -Add multiple parameters
+            1.0 | 24 Sept 2010
+                -Initial Version
+               
+    .LINK  
+        https://learn-powershell.net
+    .EXAMPLE
+        Get-PSWSUSUpdate
+        Description
+        -----------  
+        This command will list every update on the WSUS Server. 
+        
+    .EXAMPLE 
+        Get-PSWSUSUpdate -update "Exchange"
+        Description
+        -----------  
+        This command will list every update that has 'Exchange' in it.
+    
+    .EXAMPLE
+        Get-PSWSUSUpdate -update "KB925474"
+        Description
+        -----------  
+        This command will list every update that has 'KB925474' in it.
+    .EXAMPLE
+        $Categories = Get-PSWSUSCategory|Where{$_.title -match 'server 2012'}
+        Get-PSWSUSUpdate -Category $Categories
+        Description
+        -----------
+        Gets all updates matching the Windows Server 2012 category
+       
+    #> 
+    [cmdletbinding(
+        DefaultParameterSetName = 'UpdateScope',
+        SupportsShouldProcess = $True
+    )] #cmdletbinding
+    Param(
+        [Parameter(Position=0,ValueFromPipeline = $True,ParameterSetName = 'Update')]
+        [string[]]$Update,
+        [string]$IncludeText,
+        [string]$ExcludeText,
+        [ValidateSet('LatestRevisionApproved', 'HasStaleUpdateApprovals', 'NotApproved', 'Declined', 'Any')]
+        [Microsoft.UpdateServices.Administration.ApprovedStates]$ApprovedState,
+        [ValidateSet('All','Driver','SoftwareApplication','SoftwareUpdate')]
+        [Microsoft.UpdateServices.Administration.UpdateTypes]$UpdateType,
+        [switch]$ExcludeOptionalUpdates,
+        [switch]$IsWsusInfrastructureUpdate,
+        [ValidateSet('All','Downloaded','Failed','Installed','InstalledPendingReboot','NotApplicable','NotInstalled','Unknown')]
+        [Microsoft.UpdateServices.Administration.UpdateInstallationStates]$IncludedInstallationState,
+        [ValidateSet('All','Downloaded','Failed','Installed','InstalledPendingReboot','NotApplicable','NotInstalled','Unknown')]
+        [Microsoft.UpdateServices.Administration.UpdateInstallationStates]$ExcludedInstallState,
+        [DateTime]$FromArrivalDate,
+        [DateTime]$ToArrivalDate,
+        [DateTime]$FromCreationDate,
+        [DateTime]$ToCreationDate,
+        [ValidateSet('All','Install','Uninstall')]
+        [Microsoft.UpdateServices.Administration.UpdateApprovalActions]$UpdateApprovalAction,
+        [ValidateSet('All','MicrosoftUpdate','Other')]
+        [Microsoft.UpdateServices.Administration.UpdateSources]$UpdateSource,
+        [Microsoft.UpdateServices.Internal.BaseApi.UpdateCategory[]]$Category,
+        [Microsoft.UpdateServices.Internal.BaseApi.UpdateClassification[]]$Classification
+    ) #Param
+    DynamicParam {
+        $ParamOptions = @(
+            @{
+            'ParameterSetName' = 'ByComputerTargetGroup';
+            'Name' = 'ApprovedGroups';
+            'Mandatory' = $False;
+            'ValidateSetOptions' = $Wsus.GetComputerTargetGroups() | select -ExpandProperty Name -Unique  | sort Name
+            },
+            @{
+            'ParameterSetName' = 'ByComputerTargetGroup';
+            'Name' = 'ApprovedGroupsByRole';
+            'Mandatory' = $False;
+            'ValidateSetOptions' = $Wsus.Getcomputertargets()  | select -ExpandProperty ComputerRole -Unique  | Sort ComputerRole
+            },
+            @{
+            'ParameterSetName' = 'ByComputerTargetGroup';
+            'Name' = 'ApprovedGroupsByOSDescription';
+            'Mandatory' = $False;
+            'ValidateSetOptions' = $Wsus.Getcomputertargets() | select -ExpandProperty OSDescription -Unique  | sort OSDescription
+            }
+        ) #ParamOptions
+            $RuntimeParamDic = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
+            foreach ($Param in $ParamOptions) {
+                $RuntimeParam = New-ValidationDynamicParam @Param
+                $RuntimeParamDic.Add($Param.Name, $RuntimeParam)
+            } #ForEach
+            return $RuntimeParamDic
+        } #DynamicParam
+    Begin {
+        $Updates = @()
+        $PsBoundParameters.GetEnumerator() | foreach { New-Variable -Name $_.Key -Value $_.Value -ea 'SilentlyContinue'}            
+        $OldErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'stop'  
+        If ($PSCmdlet.ParameterSetName -ne 'Update') {
+            $UpdateScope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
+            If ($PSBoundParameters['ApprovedState']) {
+                $UpdateScope.ApprovedStates = $ApprovedState
+            }
+            If ($PSBoundParameters['IncludedInstallationState']) {
+                $UpdateScope.IncludedInstallationStates = $IncludedInstallationState
+            }
+            If ($PSBoundParameters['ExcludedInstallState']) {
+                $UpdateScope.ExcludedInstallStates = $ExcludedInstallState
+            }
+            If ($PSBoundParameters['UpdateApprovalAction']) {
+                $UpdateScope.UpdateApprovalActions = $UpdateApprovalAction
+            }
+            If ($PSBoundParameters['UpdateSource']) {
+                $UpdateScope.UpdateSources = $UpdateSource
+            }
+            If ($PSBoundParameters['UpdateType']) {
+                $UpdateScope.UpdateTypes = $UpdateType
+            }
+            If ($PSBoundParameters['FromArrivalDate']) {
+                $UpdateScope.FromArrivalDate = $FromArrivalDate
+            }
+            If ($PSBoundParameters['ToArrivalDate']) {
+                $UpdateScope.ToArrivalDate = $ToArrivalDate
+            }
+            If ($PSBoundParameters['FromCreationDate']) {
+                $UpdateScope.FromCreationDate = $FromCreationDate
+            }
+            If ($PSBoundParameters['ToCreationDate']) {
+                $UpdateScope.ToCreationDate = $ToCreationDate
+            }
+            If ($PSBoundParameters['ExcludeOptionalUpdates']) {
+                $UpdateScope.ExcludeOptionalUpdates = $ExcludeOptionalUpdates
+            }
+            If ($PSBoundParameters['IsWsusInfrastructureUpdate']) {
+                $UpdateScope.IsWsusInfrastructureUpdate = $IsWsusInfrastructureUpdate
+            }
+            If ($PSBoundParameters['Category']) {
+                [void]$UpdateScope.Categories.AddRange($Category)
+            }
+            If ($PSBoundParameters['Classification']) {
+                [void]$UpdateScope.Classifications.AddRange($Classification)
+            }
+            If ($PSBoundParameters['IncludeText']) {
+                $UpdateScope.TextIncludes = $IncludeText
+            }
+            If ($PSBoundParameters['ExcludeText']) {
+                $UpdateScope.TextNotIncludes = $ExcludeText
+            }
+            If ($PSBoundParameters['ApprovedGroups']) {
+                ForEach ($Group in $ApprovedGroups) {
+                    Write-Verbose "Adding Target Group: $($Group)"
+                    $GroupValue = $wsus.GetComputerTargetGroups()| ForEach-Object -Process {if ($_.Name -eq $Group) {$_}}
+                    [void]($UpdateScope.ApprovedComputerTargetGroups).Add($GroupValue)
+                }
+            }
+        } #If
+    } #Begin
+    Process {
+        Switch ($PSCmdlet.ParameterSetName) {
+            'Update' {
+                Write-Verbose "Using Parameterset 'Update'"
+                ForEach ($Item in $Update) {
+                    Write-Verbose "Searching for $($Item)"
+                    $Updates += $Wsus.SearchUpdates($Item)
+                } #ForEach       
+            } #Update
+            'UpdateScope' {
+                Write-Verbose "Using Parameterset 'UpdateScope'"
+                $Updates += $Wsus.GetUpdates($UpdateScope)
+            } #UpdateScope
+            'ByComputerTargetGroup'{
+                Write-Verbose "Using Parameterset 'ByComputerTargetGroup'"
+                $IncludeTargetGroup = @()
+                    if ($ApprovedGroupsByRole) {
+                        Write-Verbose "Determining group targets by Role."
+                        $ExcludeComputers = $Wsus.Getcomputertargets() | Where {$_.ComputerRole -ne $ApprovedGroupsByRole}
+                        $IncludeComputers = $Wsus.Getcomputertargets() | Where {$_.ComputerRole -iin $ApprovedGroupsByRole}
+                        $IncludeTargetGroup = 
+                            $IncludeComputers.GetComputerTargetGroups().Name | select -unique | 
+                                where {$_ -notin $ExcludeComputers.GetComputerTargetGroups().Name | select -Unique}
+                            if ($IncludeTargetGroup -eq $null) {
+                                Write-Host "The selected OS did not have any unique groups assigned to it. Cancelling search."
+                                Break
+                            } #If
+                    } #If
+                    if ($ApprovedGroupsByOSDescription){
+                        Write-Verbose "Determining group targets by OS Description."
+                        $IncludeComputers = $Wsus.Getcomputertargets() | Where {$_.OSDescription -iin $ApprovedGroupsByOSDescription}
+                        $ExcludeComputers = $Wsus.Getcomputertargets() | Where {$_.OSDescription -inotin $ApprovedGroupsByOSDescription}
+                        $IncludeTargetGroup = $IncludeComputers.GetComputerTargetGroups().Name | select -unique | where {$_ -notin $ExcludeComputers.GetComputerTargetGroups().Name | select -Unique}
+                        if ($IncludeTargetGroup -eq $null) {
+                            Write-Host "The selected OS did not have any unique groups assigned to it. Cancelling search."
+                            Break
+                    } #If
+                    }#If
+                    If ($IncludeTargetGroup -ne $Null) {
+                    ForEach ($Group in $IncludeTargetGroup) {
+                        Write-Verbose "Adding Target Group: $($Group)"
+                        $GroupValue = $wsus.GetComputerTargetGroups()| ForEach-Object -Process {if ($_.Name -eq $Group) {$_}}
+                        [void]($UpdateScope.ApprovedComputerTargetGroups).Add($GroupValue)
+                    }
+                }#If
+                    If ($UpdateScope.ApprovedComputerTargetGroups -ne $Null) {
+                        $Updates += $Wsus.GetUpdates($UpdateScope)  
+                        If ($Updates -eq $Null) {
+                            Write-Host "No updates were found."
+                            Break
+                        } #If
+                    } Else { 
+                    Write-Host "No Unique groups were selected."
+                    } #If/Else
+                } #ByComputerTargetGroup
+            } #Switch
+        Write-Output $Updates
+    } #Process
+    End {        
+        $ErrorActionPreference = $OldErrorAction  
+    } #End
+} #Function
+Function Approve-WSUSUpdate {
+<#  
+    .SYNOPSIS  
+        Approves a WSUS update for a specific group with an optional deadline.
+        
+    .DESCRIPTION
+        Approves a WSUS update for a specific group with an optional deadline.        
+           
+    .PARAMETER Update
+        Update(s) being approved.
+        
+    .PARAMETER Group
+        Dynamicly selected WSUS Group which will receive the update. A connection must be made for the groups to populate.
+            
+    .PARAMETER Deadline
+        Optional deadline for client to install patch.
+        
+    .PARAMETER Action
+        Type of approval action to take on update. Accepted values are Install, Approve, Uninstall and NotApproved 
+        
+    .PARAMETER PassThru
+        Display output object of approval action 
+        
+    .EXAMPLE  
+    Get-WSUSUpdate -Update "KB979906" | Approve-WSUSUpdate -Group [Group] -Action Install
+    Description
+    ----------- 
+    This command will take the collection of objects from the Get-PSWSUSUpdate command and then approve all updates for 
+    the specified groups and the action command of 'Install'.
+           
+    #> 
+    [cmdletbinding(
+    	DefaultParameterSetName = 'collection',
+        SupportsShouldProcess = $True
+    )] #cmdletbinding
+    Param(
+        [Parameter(Mandatory = $True,ValueFromPipeline = $True)]
+        [ValidateNotNullOrEmpty()]
+        [Microsoft.UpdateServices.Internal.BaseApi.Update[]]$Update,  
+                  
+        [Parameter(Mandatory = $True)]
+        [Validateset('Install','Approve','Uninstall','NotApproved')]
+        [Microsoft.UpdateServices.Administration.UpdateApprovalAction]$Action,
+                     
+        [Parameter(Mandatory = $False)]
+        [datetime]$Deadline,
+
+        [Parameter()]
+        [switch]$PassThru                                   
+        ) #Param
+    DynamicParam {
+            $ParamOptions = @(
+                @{
+                'ParameterSetName' = 'collection';
+                'Name' = 'Group';
+                'Mandatory' = $False;
+                'ValidateSetOptions' = $Wsus.GetComputerTargetGroups() | select -ExpandProperty Name -Unique  | sort Name
+                }
+            )
+        $RuntimeParamDic = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
+        foreach ($Param in $ParamOptions) {
+            $RuntimeParam = New-ValidationDynamicParam @Param
+            $RuntimeParamDic.Add($Param.Name, $RuntimeParam)
+        }
+        return $RuntimeParamDic
+        } #DynamicParam
+    Begin {
+        $PsBoundParameters.GetEnumerator() | foreach { New-Variable -Name $_.Key -Value $_.Value -ea 'SilentlyContinue'}            
+    } #Begin
+    Process {
+        If ($Group) {
+            ForEach ($Patch in $Update) {
+            $TargetGroup = $Wsus.GetComputerTargetGroups() | Where {$_.Name -iin $Group}
+                ForEach ($G in $TargetGroup) {  
+                #Accept any licenses, if required
+                    If ($Patch.RequiresLicenseAgreementAcceptance -AND -NOT($PSBoundParameters.ContainsKey('WhatIf'))) {
+                        #Approve License
+                        Write-Verbose ("Accepting license aggreement for {0}" -f $Patch.title)
+                        $Patch.AcceptLicenseAgreement()
+                    }
+                #Determine if Deadline is required
+                    If ($PSBoundParameters['deadline']) {
+                        Write-Verbose "Approving update with a deadline."
+                        If ($pscmdlet.ShouldProcess($($Patch.SecurityBulletins),$($Patch.title),"Approve update on $($Group.name)")) {
+                            #Create the computer target group
+                            $Data = $Patch.Approve($Action,$TargetGroup,$Deadline)
+                            #Print out report of what was approved
+                        }        
+                    } Else {    
+                #Approve the patch
+                        Write-Verbose "Approving update without a deadline."                              
+                        If ($pscmdlet.ShouldProcess($($Patch.title),"Approve update on $($Group.name)")) {
+                            #Create the computer target group
+                            $Data = $Patch.Approve($Action,$TargetGroup)
+                            #Print out report of what was approved               
+                        }
+                    }
+                    If ($PSBoundParameters['PassThru']) {
+                        Write-Output $Data
+                    }
+                    
+                }
+            }
+        } Else {
+            Write-Verbose "No groups selected"
+        }
+    } #Process       
+    End {} #End    
+}  #Function
+Function Disconnect-WSUSServer {
+    <#  
+    .SYNOPSIS  
+        Disconnects session against WSUS server.
+    .DESCRIPTION
+        Disconnects session against WSUS server.
+    .NOTES  
+        Name: Disconnect-PSWSUSServer
+        Author: Boe Prox
+        DateCreated: 27Oct2010 
+               
+    .LINK  
+        https://learn-powershell.net
+    .EXAMPLE
+    Disconnect-PSWSUSServer
+    Description
+    -----------
+    This command will disconnect the session to the WSUS server.  
+           
+    #> 
+    [cmdletbinding()]  
+    Param () #Param
+    Process { 
+        #Disconnect WSUS session by removing the variable   
+        Remove-Variable -Name WSUS -Force -Scope Script
+        Remove-Variable -Name WSUSConfig -Force -Scope Script
+    } #Process
+} #Function
+Function Get-WSUSDownloadStatus {
+    Process {
+    $DownloadBytes = $wsus.GetContentDownloadProgress().DownloadedBytes
+    $TotalBytes = $wsus.GetContentDownloadProgress().TotalBytesToDownload
+
+        Try {
+            $DifferenceDown = ($DownloadBytes) - ($LoginBytes)
+            $DifferenceTotal = ($TotalBytes) - ($LoginBytes)
+            $Percent = ($DifferenceDown / $DifferenceTotal * 100)
+            $Difference = $DifferenceTotal - $DifferenceDown
+            $Bytes = ($DifferenceTotal) - ($LoginBytes) 
+            Write-Host "There are $Difference bytes of $Bytes left to download. ($Percent% Complete)"
+        } Catch {
+            Write-Host "All downloads have finished, or there are no pending downloads."
+        }
+
+    }
+}
+Function Update-WSUSCllientByGroup {
+    [cmdletbinding(
+    	DefaultParameterSetName = 'collection',
+        SupportsShouldProcess = $True
+    )] #cmdletbinding
+    Param()
+    DynamicParam {
+            $ParamOptions = @(
+                @{
+                'ParameterSetName' = 'collection';
+                'Name' = 'Group';
+                'Mandatory' = $False;
+                'ValidateSetOptions' = $Wsus.GetComputerTargetGroups() | select -ExpandProperty Name -Unique  | sort Name
+                }
+            )
+        $RuntimeParamDic = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
+        foreach ($Param in $ParamOptions) {
+            $RuntimeParam = New-ValidationDynamicParam @Param
+            $RuntimeParamDic.Add($Param.Name, $RuntimeParam)
+        }
+
+        return $RuntimeParamDic
+        } #DynamicParam
+    Begin {
+        $PsBoundParameters.GetEnumerator() | foreach { New-Variable -Name $_.Key -Value $_.Value -ea 'SilentlyContinue'}            
+    } #Begin
+    Process {
+    $Id = ($wsus.GetComputerTargetGroups() | Where {$_.Name -eq "$Group"}).Id
+    $ComputerDomainNames = ($wsus.GetComputerTargetGroup("$Id").GetComputerTargets()).fulldomainname
+    ForEach ($Computer in $ComputerDomainNames) {
+    Write-Verbose "Invoking $Computer"
+    Invoke-WmiMethod -Class win32_process -ComputerName $Computer -Name create -ArgumentList  "wuauclt.exe /detectnow"
+    }
+    }
+    End {}
+}
+Function Approve-Update {
+[cmdletbinding(
+        SupportsShouldProcess = $True
+    )] #cmdletbinding
+Param ([string[]]$Updates
+)
+    Process {
+        if ($Force) {
+            ForEach ($Update in $Updates) {
+                Get-WSUSUpdate $Update -Verbose | Where {$_.ProductTitles -like "*2008*"} | Approve-WSUSUpdate -Group "Win 2008 R2" -Action Install -Verbose
+                Get-WSUSUpdate $Update -Verbose | Where {($_.ProductTitles -like "*7*") -and ($_.ProductTitles -notlike "*7 Server*")} | Approve-WSUSUpdate -Group "Win 7 x64" -Action Install -Deadline (Get-Date) -Verbose
+                Get-WSUSUpdate $Update -Verbose | where {$_.ProductTitles -like "*Server 2012*"} | Approve-WSUSUpdate -Group "Win 2012 R2" -Action Install -Verbose
+            }
+        }
+    }
+}
+Function Send-WakeOnLan {
+[CmdletBinding()]
+    Param(
+    [Parameter(Mandatory=$True,
+        Position=1,
+        ParameterSetName = 'ByMAC',
+        HelpMessage='MAC address(es) of computer(s) to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [string[]]$MAC,
+    [Parameter(Mandatory=$False,
+        Position=2,
+        HelpMessage='Computer Name, IP, or Broadcast address of Computer to wake. Default is local subnet.',
+        ValueFromPipelineByPropertyName=$True)]
+    $ComputerName = ([System.Net.IPAddress]::Broadcast),
+    [int]$Retry = 1,
+    [Parameter(Mandatory=$True,
+        Position=1,
+        ParameterSetName = 'FromFile',
+        HelpMessage='File containing MAC addresses of computer(s) to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [string]$FromFile,
+    [Parameter(Mandatory=$True,
+        Position=2,
+        ParameterSetName = 'FromFile',
+        HelpMessage='Header for MAC address of computers to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [string]$MACHeader,
+    [Parameter(Mandatory=$True,
+        Position=3,
+        ParameterSetName = 'FromFile',
+        HelpMessage='Header for hostnames or IPs to wake',
+        ValueFromPipeline=$True,
+        ValueFromPipelineByPropertyName=$True)]
+    [String]$ComputerHeader,
+    [int]$Packets
+    )
+    BEGIN {
+    IF ($FromFile) {
+    $File = Import-CSV $FromFile | select @{Name='MAC';Expression="$MACHeader"},@{Name='ComputerName';Expression="$ComputerHeader"}} 
+    }
+    Process {
+        $List = @()
+        if ($MAC) {
+        $List += $MAC}
+        if ($FromFile) {
+        $List += $File}
+        ForEach ($Address in $List) {
+            IF ($FromFile) {
+            $ComputerName = $Address.ComputerName
+	        $ComputerName = [System.Net.DNS]::GetHostEntry("$ComputerName").hostname
+            $MACBytes = ($Address.MAC -replace '[-:.]','' -replace '[{}]','').ToUpper()
+            }
+            IF ($MAC) {
+            $MACBytes = ($Address -replace '[-:.]','' -replace '[{}]','').ToUpper()
+            }
+            $MACBytes =  [Net.NetworkInformation.PhysicalAddress]::Parse($MACBytes)
+            [string]$Value = $MACBytes.ToString()
+            if ($Value.Length -eq 12) {
+                $MagicPacket = [byte[]]@(255,255,255, 255,255,255);
+                $MagicPacket += ($MACBytes.GetAddressBytes()*16)
+                Write-Verbose "Sending Packet to $MACBytes, at $ComputerName"
+                $UdpClient = New-Object System.Net.Sockets.UdpClient
+                $UdpClient.Connect($ComputerName,7)
+                $UdpClient.Send($MagicPacket,$MagicPacket.Length) | Out-Null
+                Write-Verbose "Packet Sent"
+                $UdpClient.Close()
+            } else {
+                Write-Error "The MAC Address specified is of the correct length: $Value" 
+            }
+        }
+    }
+    END {}
+}
+<#
+    Reference Material
+https://github.com/proxb/PoshWSUS
+https://blogs.technet.microsoft.com/heyscriptingguy/2012/01/19/use-powershell-to-find-missing-updates-on-wsus-client-computers/
+https://blogs.technet.microsoft.com/heyscriptingguy/2012/01/16/introduction-to-wsus-and-powershell/
+https://technet.microsoft.com/en-us/library/cc720492(WS.10).aspx
+https://learn-powershell.net/2013/05/07/tips-on-implementing-pipeline-support/
+https://blogs.technet.microsoft.com/pstips/2014/06/09/dynamic-validateset-in-a-dynamic-parameter/
+#>
+Function Check-UpdateStatus {
+[cmdletbinding(
+        SupportsShouldProcess = $True)]
+Param(
+[string[]]$Updates
+)
+    Process {
+        $HT = @()
+        $computerscope = New-Object Microsoft.UpdateServices.Administration.ComputerTargetScope
+        $updatescope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
+        ForEach ($Update in $Updates) {
+            Write-Verbose "Searching for $Update"
+            $updatescope.TextIncludes = "$Update"
+            $Summary = $wsus.GetSummariesPerUpdate($updatescope,$computerscope) | Select @{L=’UpdateTitle';E={($wsus.GetUpdate([guid]$_.UpdateId)).Title}},@{L=’NeededCount';E={($_.DownloadedCount + $_.NotInstalledCount)}},DownloadedCount,NotApplicableCount,NotInstalledCount,InstalledCount,FailedCount | Where {($_.NeededCount -or $_.DownloadedCount -or $_.NotInstalledCount) -gt 0} | sort UpdateTitle | FT -autosize -wrap
+            ForEach ($Item in $Summary) {
+                $HT += $Item
+            }
+        }
+        $HT
+    }
+}
