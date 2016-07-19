@@ -15,7 +15,7 @@ Function Get-MTU {
     -Idx
     Identifies the local interface to change within the -Set switch. If left blank, you will be prompted with your options.
     -MaxMTU
-    Limits the highest number of bytes in the packet to test for (default 35840)
+    Limits the highest number of bytes in the packet to test for (default 1544)
     -Timeout
     Changes the timeout parameter in miliseconds of the ping packet (default 500)
 	
@@ -44,7 +44,8 @@ This will account for the additional frame header and detects VLAN settings. Eac
                    HelpMessage='Toggle to change the interface')]
         [switch]$Set,
         [int]$Timeout = "500",
-        [int]$MaxMTU = "35840"
+        [int]$MaxMTU = "1544",
+        [switch]$Retry
     ) #Param
 
     BEGIN {
@@ -96,7 +97,9 @@ This will account for the additional frame header and detects VLAN settings. Eac
                 $MTUSize += $Difference
                 $LastLatency = ($TestPing.RoundtripTime + 15)
             } else {
+                if ($Retry) {
                 $TestPing = $PingObject.Send($Address,$LastLatency,$($ByteBuffer[1..$MTUSize]),$PingOptions)
+                }
                 if ($TestPing.Status.ToString() -ne 'Success') {
                 Write-Verbose "Failure"
                 $MTUSize -= $Difference
@@ -134,8 +137,6 @@ This will account for the additional frame header and detects VLAN settings. Eac
                 Write-Verbose "VLAN not detected"
                 return ($24MTUSize)
             }#If
-
-
         } else {
         return ($28MTUSize)
         } #If/Else
