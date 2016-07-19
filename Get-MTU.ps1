@@ -56,12 +56,6 @@ This will account for the additional frame header and detects VLAN settings. Eac
     }
 
     PROCESS {
-
-    
-
-
-
-
         Write-Verbose "Testing connection to $Address..."
         $TestPing = $PingObject.Send($Address,$Timeout,$($ByteBuffer[1]))
         if ($TestPing.status.ToString() -ne 'Success') {
