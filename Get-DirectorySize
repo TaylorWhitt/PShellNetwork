@@ -1,0 +1,27 @@
+Function Get-DirectorySize {
+    param(
+    $Path
+    )
+    BEGIN {
+    $Properties = @(
+        @{
+            Name = 'Directory'
+            Expression = {
+                $_.name
+            }
+        },
+        @{
+            Name='Size'
+            Expression = {
+                (get-childitem $_.FullName -recurse | Measure-Object -Property length -sum | select $_.Size).Sum
+            }
+        }
+    )
+    }
+    Process{
+        $Files =  Get-ChildItem -path $Path | where {$_.Attributes -eq "Directory"}
+        ForEach ($File in $Files) {
+            $File | select $Properties
+        }
+    }
+}
