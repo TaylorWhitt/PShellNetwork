@@ -1,6 +1,6 @@
 # PShellNetwork
 # Powershell Scripts to assist with networking optomizations.
-# This is my very first scripting experience that actually does something useful - go easy on me/suggestions welcome.
+# This is my very first script I worked on.  It has come all the way from using PING.exe!
 
 Function Get-MTU {
     
@@ -43,7 +43,7 @@ This will account for the additional frame header and detects VLAN settings. Eac
                    ParameterSetName='Set',
                    HelpMessage='Toggle to change the interface')]
         [switch]$Set,
-        [int]$Timeout = "500",
+        [int]$Timeout = "1250",
         [int]$MaxMTU = "1544",
         [switch]$Retry
     ) #Param
@@ -51,7 +51,6 @@ This will account for the additional frame header and detects VLAN settings. Eac
     BEGIN {
     $PingObject = New-Object System.Net.NetworkInformation.Ping
     $PingOptions = New-Object System.Net.NetworkInformation.PingOptions
-    $MaxMTU = [math]::Abs($MaxMTU)
     [byte[]]$ByteBuffer = ,0xff * $MaxMTU
     [void][int]$MTUSize
     [void][int]$Difference 
@@ -68,7 +67,7 @@ This will account for the additional frame header and detects VLAN settings. Eac
         } #If
 
         if ($Set) {
-            #Temporary fix to odd bug where if MaxMTU was set below Interface capability, it would continue past the value due to internal fragmentation.
+            #Temporary fix to odd bug where if MaxMTU was set below Interface capability, it would continue past the value (I suppose due to internal fragmentation).
             $MaxMTU += 28
             if ($Idx -ne $Null) {
                 $Interface = $Idx
@@ -76,7 +75,6 @@ This will account for the additional frame header and detects VLAN settings. Eac
                 & netsh.exe interface ipv4 show interfaces | Out-Null
                 $Interface = Read-Host 'Input which interface (Idx number) you would like to change'
             }
-            
             & netsh.exe interface ipv4 set interface "interface=$Interface" "mtu=$MaxMTU" | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Insufficient credentials, or an invalid interface was provided.  Please try again.  Continuing to find MTU with current settings..."
@@ -87,11 +85,11 @@ This will account for the additional frame header and detects VLAN settings. Eac
         $DifferenceCount = 0
         $LastLatency = $Timeout
         while (($Difference -gt 1 -or $TestPing.Status.Tostring() -eq 'Success' -or $DifferenceCount -le 1) -and $MTUSize -lt ($MaxMTU - 24)) {
-        
             Write-Verbose "Trying Size: $MTUSize"
             $TestPing = $PingObject.Send($Address,$Timeout,$($ByteBuffer[1..$MTUSize]),$PingOptions)
             if ($Difference -eq 1) { $DifferenceCount += 1 
-            } else { $Difference = [math]::Ceiling($Difference / 2 ) }
+            } else { $Difference = [math]::Ceiling($Difference / 2 ) 
+            } #If/Else
             if ($TestPing.status.ToString() -eq 'Success') {
                 Write-Verbose "Success"
                 $MTUSize += $Difference
@@ -111,35 +109,19 @@ This will account for the additional frame header and detects VLAN settings. Eac
 
         } #While
 
-        $24MTUSize = $MTUSize + 24  # Add 24 bytes for packet header that is not included in ping size (payload) parameters.  (Payload+Header=MTU)
-        $28MTUSize = $MTUSize + 28  # If the computer uses a VLAN, add 4 bytes for packet header.
-            Write-Verbose "`n`n Optimal payload size of $MTUSize was found for the address: $Address `n The MTU size below should be <= $28MTUSize, depending on local VLAN options `n" 
+        
+        $28MTUSize = $MTUSize + 28  # Add room for header information.  (Payload+Header=MTU)
+        Write-Verbose "`n`n Optimal payload size of $MTUSize was found for the address: $Address `n The MTU size below should be <= $28MTUSize"
 
         # Change internet adapter MTU settings.
         
         if ($Set) {
 
-            Write-Verbose "Setting Local interface to: $24MTUSize to account for packet header"
-            & netsh.exe interface ipv4 set interface "$Interface" "mtu=$24MTUSize" | Out-Null
-        Write-Verbose "Testing with interface MTU set to detect VLAN settings."
-        $TestPing = $PingObject.Send($Address,$Timeout,$($ByteBuffer[1..$MTUSize]),$PingOptions)
-              
-            if ($TestPing.status.ToString() -ne 'Success') {
-                Write-Verbose "VLAN detected, setting MTU to: $28MTUSize"
-                & netsh.exe interface ipv4 set interface "$Interface" "mtu=$28MTUSize" | Out-Null
-                $TestPing = $PingObject.Send($Address,$Timeout,$($ByteBuffer[1..$MTUSize]),$PingOptions)
-                if ($TestPing.status.ToString() -ne 'Success') {
-                Write-error "Something went wrong"
-                } else {
-                return ($28MTUSize)
-                }
-            } else {
-                Write-Verbose "VLAN not detected"
-                return ($24MTUSize)
-            }#If
-        } else {
-        return ($28MTUSize)
-        } #If/Else
+            Write-Verbose "Setting Local interface to: $28MTUSize to account for packet header."
+            & netsh.exe interface ipv4 set interface "$Interface" "mtu=$28MTUSize" | Out-Null
+
+        } #If
+        Return ($28MTUSize)
     } #Process
     END {}
 } #Function
