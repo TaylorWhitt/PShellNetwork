@@ -43,7 +43,7 @@ This will account for the additional frame header and detects VLAN settings. Eac
                    ParameterSetName='Set',
                    HelpMessage='Toggle to change the interface')]
         [switch]$Set,
-        [int]$Timeout = "1250",
+        [int]$Timeout = "2000",
         [int]$MaxMTU = "1544",
         [switch]$Retry
     ) #Param
