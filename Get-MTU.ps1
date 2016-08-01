@@ -69,10 +69,10 @@ This will account for the additional frame header and detects VLAN settings. Eac
         if ($Set) {
             #Temporary fix to odd bug where if MaxMTU was set below Interface capability, it would continue past the value (I suppose due to internal fragmentation).
             $MaxMTU += 28
-            if ($Idx -ne $Null) {
+            if ($Idx) {
                 $Interface = $Idx
             } else {
-                & netsh.exe interface ipv4 show interfaces | Out-Null
+                & netsh.exe interface ipv4 show interfaces 
                 $Interface = Read-Host 'Input which interface (Idx number) you would like to change'
             }
             & netsh.exe interface ipv4 set interface "interface=$Interface" "mtu=$MaxMTU" | Out-Null
