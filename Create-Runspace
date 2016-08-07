@@ -1,0 +1,104 @@
+Function Create-RunSpace {
+[CmdletBinding()]
+Param(
+[String]$Scriptblock,
+$ScriptParams = @{},
+$NumThreads = "2"
+)
+BEGIN {}
+
+PROCESS {
+# Create RunspacePool and Jobs
+    $RunspacePool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $NumThreads, $Host)
+    $RunspacePool.Open()
+    [System.Collections.ArrayList]$Jobs = @()
+
+Write-Verbose "Setting up Jobs..."
+$Last = $ArrayToThread.count
+
+    # Set up Jobs for each object...
+    for ($i = 0; $i -lt $Last; $i++) 
+    {      
+
+		# Catch when trying to divide through zero
+        try {
+			$Progress_Percent = (($i.count) / $ArrayToThread.count) * 100 
+		} 
+		catch { 
+			$Progress_Percent = 100 
+		}
+
+        Write-Progress -Activity "Setting up jobs..." -Id 1 -Status "Current Object: $i" -PercentComplete $Progress_Percent
+						 
+		# Create new job
+        $Job = [System.Management.Automation.PowerShell]::Create().AddScript($ScriptBlock).AddParameters($ScriptParams)
+        $Job.RunspacePool = $RunspacePool
+
+        $JobObj = [pscustomobject] @{
+            RunNum = $i.count
+            Pipe = $Job
+            Result = $Job.BeginInvoke()
+        }
+
+        # Add job to collection
+        [void]$Jobs.Add($JobObj)
+    }
+
+    Write-Verbose "Waiting for jobs to complete & starting to process results..."
+
+    # Total jobs to calculate percent complete, because jobs are removed after they are processed
+    $Jobs_Total = $Jobs.Count
+    Write-host $Jobs_Total
+
+    # Process results, while waiting for other jobs
+    Do {
+        # Get all jobs, which are completed
+        $Jobs_ToProcess = $Jobs | Where-Object {$_.Result.IsCompleted}
+  
+        # If no jobs finished yet, wait 500 ms and try again
+        if($Jobs_ToProcess -eq $null)
+        {
+            Write-Verbose "No jobs completed, wait 500ms..."
+
+            Start-Sleep -Milliseconds 500
+            continue
+        }
+        
+        # Get jobs, which are not complete yet
+        $Jobs_Remaining = ($Jobs | Where-Object {$_.Result.IsCompleted -eq $false}).Count
+
+        # Catch when trying to divide through zero
+        try {            
+            $Progress_Percent = 100 - (($Jobs_Remaining / $Jobs_Total) * 100) 
+        }
+        catch {
+            $Progress_Percent = 100
+        }
+
+        Write-Progress -Activity "Waiting for jobs to complete... ($($NumThreads - $($RunspacePool.GetAvailableRunspaces())) of $NumThreads threads running)" -Id 1 -PercentComplete $Progress_Percent -Status "$Jobs_Remaining remaining..."
+      
+        Write-Verbose "Processing $(if($Jobs_ToProcess.Count -eq $null){"1"}else{$Jobs_ToProcess.Count}) job(s)..."
+
+        # Processing completed jobs
+        foreach($Job in $Jobs_ToProcess)
+        {       
+            # Get the result...     
+            $Job_Result = $Job.Pipe.EndInvoke($Job.Result)
+            $Job.Pipe.Dispose()
+
+            # Remove job from collection
+            $Jobs.Remove($Job)
+        } 
+
+    } While ($Jobs.Count -gt 0)
+
+    Write-Verbose "Closing RunspacePool and free resources..."
+
+    # Close the RunspacePool and free resources
+    $RunspacePool.Close()
+    $RunspacePool.Dispose()
+
+    Write-Verbose "Script finished at $(Get-Date)"
+}
+END {Write-Output $Job_Result}
+}
