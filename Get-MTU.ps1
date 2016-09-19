@@ -17,7 +17,7 @@ Function Get-MTU {
     -MaxMTU
     Limits the highest number of bytes in the packet to test for (default 1544)
     -Timeout
-    Changes the timeout parameter in miliseconds of the ping packet (default 500)
+    Changes the timeout parameter in miliseconds of the ping packet (default 2000)
 	
 	.Example
 	 Get-MTU www.google.com
