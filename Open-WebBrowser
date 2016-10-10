@@ -1,0 +1,102 @@
+Function Open-WebBrowser {
+
+[CmdletBinding()]
+Param(
+[Parameter(Mandatory = $True,ValueFromPipeline = $True)]
+[string]$WebPage,
+[int]$Screen = 0,
+[string[]]$Arguments = @(),
+[switch]$Force,
+$Domain = $env:USERDOMAIN,
+$Cred = (Get-Credential)
+
+)
+
+$Username = $Cred.UserName
+$Password = $cred.GetNetworkCredential().password
+
+$asm = [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
+$Instance = [System.Windows.Forms.Screen]::AllScreens
+
+$ie = New-Object -ComObject InternetExplorer.Application
+$ie.Navigate2("$WebPage")
+$ie.Resizable = $true
+$ie.Top = $Instance[$Screen].WorkingArea.Top
+$ie.Left = $Instance[$Screen].WorkingArea.Left
+$ie.Width = $Instance[$Screen].WorkingArea.Width
+$ie.height = $Instance[$Screen].WorkingArea.Height
+while ($ie.Busy -eq $true) 
+{ 
+    Start-Sleep -Milliseconds 1000; } 
+if ($Force) {
+Write-verbose "Bypassing SSL Certificate Error Page";
+$sslbypass=$ie.Document.getElementsByTagName("a") | where-object {$_.id -eq "overridelink"};
+$sslbypass.click();
+} elseif ($ie.document.url -Match "invalidcert") {
+Write-host "$Webpage has an invalid or untrusted certificate.  Only use the '-Force' parameter if you trust this link."
+$ie.Quit()
+Break
+}
+$ie.Visible = $True
+while ($ie.Busy -eq $true) 
+{ 
+    Start-Sleep -Milliseconds 500; 
+}
+$doc = $ie.Document
+$loginform = $doc.forms | where {$_.action -match "login"}
+$elements = $loginform.elements
+$UsernameField = $elements | Where {$_.type -eq 'text' -and $_.name -match "username"}
+$PasswordField = $elements | Where {$_.type -eq 'password' -and $_.name -match "password"}
+$LoginButton = $null
+$wshell = New-Object -ComObject wscript.shell;
+if ($WebPage -match "Orion") {
+    $LoginButton = $doc.all | where {$_.textcontent -match "Login" -and $_.href -ne $null}
+    $UsernameField.value = 'Domain\' + $Username
+    $PasswordField.value = $Password
+} elseif ($WebPage -match "Splunk") {
+    $LoginButton = $loginform | where {$_.value -match "Sign in"}
+    $UsernameField.value = $Username
+    $wshell.AppActivate($ie.LocationName)
+    $UsernameField.select()
+    sleep 1
+    $wshell.SendKeys($Username)
+    $PasswordField.value = $Password
+    $wshell.AppActivate($ie.LocationName)
+    $PasswordField.select()
+    sleep 1
+    $wshell.SendKeys($Password)
+} else {
+$ie.Quit()
+Write-host "$Webpage has not been integrated with this script."
+break
+}
+$LoginButton.click()
+if ($ie.document.title -match "Splunk")
+{
+sleep 3
+$ie.Navigate2("#Censored#")
+}
+}
+
+<# Notes and usage
+
+$cred = Get-Credential -Message 'Please provide username and password to login to XXXX.  Do not include the Domain portion.' -UserName $env:USERNAME
+#Open-WebBrowser -WebPage Splunk/Solarwinds -Screen 0 -Force -Cred $cred
+
+if (Test-Path 'C:\Program Files (x86)\Transparent Screen Lock SC\Lock Now.exe') {
+& 'C:\Program Files (x86)\Transparent Screen Lock SC\Lock Now.exe'
+}
+
+[System.Windows.Clipboard]::GetText([System.Windows.TextDataFormat]::Text)
+[System.Windows.Clipboard]::SetText('text')
+
+function Find-FormInputFields {
+$activeelement = $ie.Document.all | where {$_.name -ne $null}
+$num = 1
+    foreach ($element in $activeelement) {
+    $element.value = $num
+    $num++
+    }
+}
+$doc.all | where {$_.name -ne $null -or $_.type -ne $null -or $_.value -ne $null}
+#>
