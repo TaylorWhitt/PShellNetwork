@@ -1,0 +1,20 @@
+function Get-RootDenominators {
+Param (
+[System.Collections.ArrayList][int[]]$IntArray = @(1..1000)
+)
+
+    for ($i = $IntArray[0]; $i -le $IntArray[($IntArray.count - 1)]; $i++) 
+    {
+    [int]$N = $i
+        While ($N -lt $IntArray[-1] -and $N -gt 1) 
+        {
+        [int]$N = $i + $N
+        If ($IntArray -contains $N)
+            {
+                $IntArray.remove($N)
+                
+            }
+        }
+    }
+    Return $IntArray
+}
