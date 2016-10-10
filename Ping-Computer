@@ -1,0 +1,42 @@
+function Ping-Computer {
+[CmdLetBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Destination,
+        [int]$Size = "32",
+        [bool]$DNF = $False,
+        [int]$TTL = "128",
+        [int]$Count = 4,
+        $Showhops = $False,
+        $SourceAddress,
+        [bool]$Resolve = $False,
+        [int]$Timeout = "4000",
+        $Threads = 5
+    )
+    Begin{
+    }
+Process{
+    $PingObj = New-Object System.Net.NetworkInformation.Ping
+    $PingOptions = New-Object System.Net.NetworkInformation.PingOptions
+    $Responses = New-Object Collections.Arraylist 
+    $PingOptions.Ttl = $TTL
+    $PingOptions.DontFragment = $DNF
+
+    #$RunspacePool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $Threads, $Host)
+    #$RunspacePool.Open()
+    #$$RunspacePool. (BoeProx has something for here)
+    [System.Collections.ArrayList]$Responses = @()
+    ForEach ($Computer in $Destination) {
+        
+        [void]$Responses.Add(($PingObj).SendPingAsync($Computer,$Timeout,$Size,$PingOptions))        
+    }
+        Write-Verbose "Waiting for ping tasks to complete..."
+        [Threading.Tasks.Task]::WaitAll($Responses)
+
+        ForEach ($Response in $Responses) { Write-Output $Response.Result}
+} 
+End{}
+}
+
+#Unfinished
