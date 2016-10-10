@@ -1,0 +1,45 @@
+function Get-SysInfo {
+[CmdletBinding()]
+param(
+	[Parameter(Mandatory=$True,
+		   Position=1,
+		   HelpMessage='Computer, or list to query',
+		   ValueFromPipeline=$True,
+		   ValueFromPipelineByPropertyName=$True)]
+	[string[]]$ComputerName
+)
+	PROCESS {
+		if (check $computer) {
+			foreach ($Computer in $ComputerName) {
+    			$os = Get-WmiObject -Class win32_operatingsystem -ComputerName $Computer
+ 			$cs = Get-WmiObject -class win32_computersystem -ComputerName $Computer
+    			$bios = Get-WmiObject -Class Win32_BIOS -ComputerName $Computer
+    
+  			$props = @{'ComputerName'=$Computer;
+       		       	   'OSVersion'=$os.version;
+     		           'SPVersion'=$os.servicepackmajorversion;
+      	        	   'Manufacturer'=$cs.manufacturer;
+     			   'Model'=$cs.model;
+    		           'RAM'=$cs.totalphysicalmemory;
+    			   'BIOSSerial'=$bios.serialnumber                
+    			}
+		}
+   		$obj = New-Object -TypeName PSObject -Property $props
+    		Write-Output $obj
+		} #Foreach
+	} # process
+} #Function
+
+Function check($Computer) {
+	$works = $True
+	if (Test-Connection $Computer -quiet) {
+		try {
+			gwmi win32_bios -ComputerName $computer -ea stop | out-null
+		} catch {
+			$works = $false
+		}	
+	} else {
+		$works = $false
+	}
+	return $works
+}
