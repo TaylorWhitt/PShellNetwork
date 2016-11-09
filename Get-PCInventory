@@ -1,0 +1,113 @@
+Function Get-PCInventory {
+[CmdletBinding()] 
+ Param(
+  [Parameter(Mandatory=$False,Position=0, ValueFromPipeline=$True, ValueFromPipelineByPropertyName = $true)]
+  [string[]]$Computers = [System.Net.DNS]::GetHostEntry("localhost").hostname
+)
+#
+BEGIN {
+}
+
+PROCESS {
+
+    foreach ($Computer in $Computers) {
+    $Computer = [System.Net.DNS]::GetHostEntry("$Computer").HostName
+    $ComputerName = $Computer.ToString()
+    Write-Verbose "Checking $ComputerName"
+    If (Test-Connection $ComputerName -count 1) {
+        #test to see if the hostname matches otherwise we might have stale dns entry
+        if($computerName.split('.')[0].ToUpper() -eq ((Get-WmiObject -Class Win32_ComputerSystem -ComputerName $ComputerName).Name).toUpper()){
+            Write-Verbose "Scanning $computerName"
+            $wmiProcObj = Get-WmiObject -ComputerName $computerName Win32_Processor -ErrorAction SilentlyContinue
+            $wmiBios = Get-WmiObject -ComputerName $computerName Win32_Bios -ErrorAction SilentlyContinue
+            $compSerialNumer = $wmiBios.SerialNumber
+            $wmiProcName = $wmiProcObj.Name.ToString()
+            $processorSpeed = $wmiProcObj.MaxClockSpeed.ToString()
+        }
+        $lastLogonUser = (Get-LastLogon $ComputerName).User
+        $compOS = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $computerName
+        $compOSVersion = $compOS.Version
+        $compOSCaption = $compOS.Caption
+        $compOSServicePack = $compOS.ServicePackMajorVersion
+        $compOSArch = $compOS.OSArchitecture
+        if (-not $compOSArch){
+            $compOSArch = "32-bit"
+        }
+        $wmiMemObj = Get-WmiObject -ComputerName $computerName Win32_ComputerSystem -ErrorAction SilentlyContinue
+        $memory = $wmiMemObj.TotalPhysicalMemory
+        $memoryGB = [math]::Round($memory/[math]::Pow(1024,3), 2)
+        $ip = [System.Net.Dns]::GetHostAddresses($ComputerName) | Where-Object -Property AddressFamily -eq InterNetwork
+        $ip = $ip[0].IPAddressToString
+        #May pull additional information later
+        $NIC = Get-WmiObject win32_networkadapter -ComputerName $ComputerName | where {$_.NetEnabled -eq $true} | select ProductName,MACAddress,NetConnectionID,Speed 
+        $software = Get-InstalledApps -computers $ComputerName
+        $comp = @{
+            'Computer Name' = $ComputerName
+            'Serial Number' = $compSerialNumer
+            'Last logged on user' = $lastLogonUser
+            'Operating System' = $compOSCaption
+            'Operating System Version' = $compOSVersion
+            'Arch' = $compOSArch
+            'Service Pack Level' = $compOSServicePack
+            'IP Address' = $ip
+            'MAC' = $NIC.MacAddress
+            'CPU Name' = $wmiProcName
+            'CPU Speed(Ghz)' = $processorSpeed
+            'Memory(GB)' = $memoryGB
+            'Software' = $software
+        }
+        $outComp = New-Object -TypeName PSObject -Property $comp
+        write-output $outComp
+        } else {
+            Write-Verbose "WMIC Name does not match, possible bad dns entry"
+        } #If/Else
+    }#ForEach
+}#Process
+}#Function
+<#
+function Get-SysInfo {
+[CmdletBinding()]
+param(
+	[Parameter(Mandatory=$True,
+		   Position=1,
+		   HelpMessage='Computer, or list to query',
+		   ValueFromPipeline=$True,
+		   ValueFromPipelineByPropertyName=$True)]
+	[string[]]$ComputerName
+)
+	PROCESS {
+		if (check $computer) {
+			foreach ($Computer in $ComputerName) {
+    			$os = Get-WmiObject -Class win32_operatingsystem -ComputerName $Computer
+ 			$cs = Get-WmiObject -class win32_computersystem -ComputerName $Computer
+    			$bios = Get-WmiObject -Class Win32_BIOS -ComputerName $Computer
+    
+  			$props = @{'ComputerName'=$Computer;
+       		       	   'OSVersion'=$os.version;
+     		           'SPVersion'=$os.servicepackmajorversion;
+      	        	   'Manufacturer'=$cs.manufacturer;
+     			   'Model'=$cs.model;
+    		           'RAM'=$cs.totalphysicalmemory;
+    			   'BIOSSerial'=$bios.serialnumber                
+    			}
+		}
+   		$obj = New-Object -TypeName PSObject -Property $props
+    		Write-Output $obj
+		} #Foreach
+	} # process
+} #Function
+
+Function check($Computer) {
+	$works = $True
+	if (Test-Connection $Computer -quiet) {
+		try {
+			gwmi win32_bios -ComputerName $computer -ea stop | out-null
+		} catch {
+			$works = $false
+		}	
+	} else {
+		$works = $false
+	}
+	return $works
+}
+#>
