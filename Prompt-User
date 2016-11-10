@@ -1,0 +1,21 @@
+function Prompt-User { 
+    param (
+        [string]$Caption = 'Prompt-User: Hit X to cancel this operation', 
+        [string]$Message, 
+        [string[]]$Options, 
+        [int]$Default = 0
+    )
+    Begin {
+        [void][System.Management.Automation.Host.ChoiceDescription[]]$Choices
+    }
+    Process {
+        foreach ($option in $Options) {
+            $Choice = New-Object System.Management.Automation.Host.ChoiceDescription "$option","$option"
+            [System.Management.Automation.Host.ChoiceDescription[]]$Choices += $Choice
+        }
+        $result = $Host.UI.Promptforchoice($Caption,$Message,$Choices,$Default)  
+    } #Process
+    END {
+    return $Choices[$result].label 
+    }
+}
