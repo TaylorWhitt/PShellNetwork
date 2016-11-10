@@ -1,0 +1,24 @@
+Function New-ImageBitmapFromStream {
+[CmdletBinding()]
+Param(
+[System.Byte[]]$Stream,
+[System.IO.DirectoryInfo]$Save)
+BEGIN{
+Add-Type -AssemblyName System.Drawing
+}
+PROCESS{
+    $Imageconverter = New-Object System.Drawing.ImageConverter
+    [System.Drawing.Bitmap]$Bitmap = $Imageconverter.ConvertFrom($Stream)
+    If ($Save) {
+        $Bitmap.Save("$Save")
+    } Else {
+        Return $Bitmap
+    }
+}
+END{}
+}
+<#
+$Save = "C:\Users\$env:USERNAME\desktop\OEMlogo.bmp"
+$Stream = (Get-WmiObject -Class Win32_ComputerSystem).OEMlogobitmap
+New-ImageBitmapFromStream -Stream $Stream -Save $Save
+#>
