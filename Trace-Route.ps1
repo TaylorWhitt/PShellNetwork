@@ -47,7 +47,7 @@ Function Trace-Route {
         $ping.Send("$Address") | Out-Null
         Write-Verbose "Tracing $Address"
         for ($TTL=1;$TTL -le $MaxTTL; $TTL++) {
-            $PingOptions = new-object System.Net.NetworkInformation.PingOptions($ttl, $dontfragment)   
+            $PingOptions = new-object System.Net.NetworkInformation.PingOptions($TTL, $DoNotFragment)   
             $Reply = $Ping.Send($Address, $Timeout, $msg, $PingOptions)
             $Hop = '' | select Hop,Address
             $addr = $reply.Address
