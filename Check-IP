@@ -1,0 +1,76 @@
+Function Check-IP {
+    [CmdletBinding()]
+    [Alias()]
+    [OutputType([int])]
+    Param
+    (
+        # IP address to check against the database.
+        [Parameter(Mandatory=$true,
+                   ValueFromPipelineByPropertyName=$true,
+                   Position=0)]
+        [IPAddress]
+        $IP,
+        [Parameter(Mandatory=$false,
+                   ValueFromPipelineByPropertyName=$true,
+                   Position=1)]
+        # E-mail, required to request a check be done. 'example@gmail.com'
+        [string]
+        $Email,
+        [Parameter(Mandatory=$true,
+                   ValueFromPipelineByPropertyName=$true,
+                   Position=2)]
+        [ValidateSet("m","b",$null,"f")]
+        <#
+            flags=m is used when you're only looking for the value of "1" as the result. The m flag skips the dynamic checks and only uses static ban lists. 
+	        flags=b is used when you want to use static ban and dynamic checks with partial bad IP check.
+	        flags=f is used when you want to force the system to do a full lookup, which can take up to 5 seconds. 
+	        oflags=b is used when you want to see if the IP is considered as bad IP. Note that when using flags option, this result can vary.
+	        oflags=c is used when you want to see which country the IP came from / which country the IP belongs to (GeoIP Location). Currently in alpha testing.
+        #>
+        [string]$Flag = 'b'
+    )
+
+    Begin
+    {
+    }
+    Process
+    {
+        $IPAddress = $IP.IPAddressToString
+        try {
+            $Result = Invoke-WebRequest -URI "http://check.getipintel.net/check.php?ip=$IPAddress&contact=$Email&flags=$Flag"
+            } catch {
+
+            }
+        Return $Result.content
+    }
+    End
+    {
+
+    }
+
+}
+<#
+Function test-this {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$false,
+                   ValueFromPipelineByPropertyName=$true,
+                   Position=0)]
+$IPs
+)
+BEGIN {}
+Process {
+ForEach ($IP in $IPs) {
+$Address = $IP.src_ip
+sleep 5
+Write-Verbose "Checking: $Address"
+$Result = Check-IP -IP $Address
+$IP.Result = $Result
+Write-Verbose "$Address Risk= $Result"
+}
+}
+END {}
+}
+
+# https://github.com/blackdotsh/getIPIntel
+#>
