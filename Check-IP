@@ -10,13 +10,13 @@ Function Check-IP {
                    Position=0)]
         [IPAddress]
         $IP,
-        [Parameter(Mandatory=$false,
+        [Parameter(Mandatory=$true,
                    ValueFromPipelineByPropertyName=$true,
                    Position=1)]
         # E-mail, required to request a check be done. 'example@gmail.com'
         [string]
         $Email,
-        [Parameter(Mandatory=$true,
+        [Parameter(Mandatory=$false,
                    ValueFromPipelineByPropertyName=$true,
                    Position=2)]
         [ValidateSet("m","b",$null,"f")]
