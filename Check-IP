@@ -49,28 +49,3 @@ Function Check-IP {
     }
 
 }
-<#
-Function test-this {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory=$false,
-                   ValueFromPipelineByPropertyName=$true,
-                   Position=0)]
-$IPs
-)
-BEGIN {}
-Process {
-ForEach ($IP in $IPs) {
-$Address = $IP.src_ip
-sleep 5
-Write-Verbose "Checking: $Address"
-$Result = Check-IP -IP $Address
-$IP.Result = $Result
-Write-Verbose "$Address Risk= $Result"
-}
-}
-END {}
-}
-
-# https://github.com/blackdotsh/getIPIntel
-#>
